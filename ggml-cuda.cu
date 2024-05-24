@@ -2594,6 +2594,12 @@ GGML_CALL static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t
                 }
             }
 
+            // Temporarily disable CUDA graphs with the below combination which results in extra memory copies
+            // that are causing an issue. TO DO investigate how to enable.
+            if (node->op == GGML_OP_MUL_MAT && !ggml_is_contiguous(node->src[1]) && node->src[0]->type != GGML_TYPE_F16) {
+                use_cuda_graph=false;
+            }
+
             if (!use_cuda_graph) {
                 break;
             }
