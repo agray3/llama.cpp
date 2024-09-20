@@ -195,7 +195,17 @@ static __global__ void flash_attn_vec_ext_f16(
 
 #pragma unroll
             for (int j = 0; j < ncols; ++j) {
+
+                // Print debug values on single thread in first iter of i_KQ_0 loop
+                bool debug_print = (i_KQ_0==0 && blockIdx.x==0 && threadIdx.x == 0 && blockIdx.y==0 && threadIdx.y==0);
+                if(debug_print)
+                    printf("Before vec_dot_KQ: Q_ds=%f\n",__half2float(Q_ds[0][0].x));
+
                 half sum = vec_dot_KQ(K + (k_VKQ_0 + i_KQ)*nb11, Q_h2[j], Q_i32[j], Q_ds[j]);
+
+                if(debug_print) // should be same as above, but is instead NAN
+                    printf("After vec_dot_KQ: Q_ds=%f\n",__half2float(Q_ds[0][0].x));
+
                 sum = warp_reduce_sum((float)sum);
 
                 if (use_logit_softcap) {
