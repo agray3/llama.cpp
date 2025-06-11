@@ -1761,10 +1761,16 @@ static __global__ void k_compute_batched_ptrs(
         size_t  nb12, size_t  nb13,
         size_t  nbd2, size_t  nbd3,
         int64_t r2,   int64_t r3) {
+#if !defined(GGML_USE_HIP) && __CUDA_ARCH__ >= GGML_CUDA_CC_HOPPER
+    cudaGridDependencySynchronize();
+#endif
     const int64_t i13 = blockIdx.x * blockDim.x + threadIdx.x;
     const int64_t i12 = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (i13 >= ne13 || i12 >= ne12) {
+#if !defined(GGML_USE_HIP) && __CUDA_ARCH__ >= GGML_CUDA_CC_HOPPER
+    cudaTriggerProgrammaticLaunchCompletion();
+#endif
         return;
     }
 
@@ -1774,6 +1780,9 @@ static __global__ void k_compute_batched_ptrs(
     ptrs_src[0*ne23 + i12 + i13*ne12] = (const char *) src0_as_f16 + i02*nb02 + i03*nb03;
     ptrs_src[1*ne23 + i12 + i13*ne12] = (const char *) src1_as_f16 + i12*nb12 + i13*nb13;
     ptrs_dst[0*ne23 + i12 + i13*ne12] = (      char *)         dst + i12*nbd2 + i13*nbd3;
+#if !defined(GGML_USE_HIP) && __CUDA_ARCH__ >= GGML_CUDA_CC_HOPPER
+    cudaTriggerProgrammaticLaunchCompletion();
+#endif
 }
 
 // Type traits for mapping ggml types to CUDA/cuBLAS types
@@ -2901,6 +2910,59 @@ static void evaluate_and_capture_cuda_graph(ggml_backend_cuda_context * cuda_ctx
             }
 
             CUDA_CHECK(cudaStreamEndCapture(cuda_ctx->stream(), &cuda_ctx->cuda_graph->graph));
+
+            // Set programmatic dependency properties for all edges
+            // TO DO restrict this to when running on Hopper or later
+            
+            size_t num_nodes = 0;
+            CUDA_CHECK(cudaGraphGetNodes(cuda_ctx->cuda_graph->graph, nullptr, &num_nodes));
+
+            if (num_nodes > cuda_ctx->cuda_graph->graph_nodes.size()) {
+                cuda_ctx->cuda_graph->graph_nodes.resize(num_nodes);
+            }
+
+            if (num_nodes > 0) {
+                CUDA_CHECK(cudaGraphGetNodes(cuda_ctx->cuda_graph->graph, cuda_ctx->cuda_graph->graph_nodes.data(), &num_nodes));
+            }
+
+            size_t max_dependencies = 0;
+            for (size_t i = 0; i < num_nodes; i++) {
+                size_t num_dependencies = 0;
+                CUDA_CHECK(cudaGraphNodeGetDependencies(cuda_ctx->cuda_graph->graph_nodes[i], nullptr, &num_dependencies));
+                if (num_dependencies > max_dependencies)
+                    max_dependencies = num_dependencies;
+            }
+
+            if (max_dependencies > cuda_ctx->cuda_graph->graph_dependencies.size()) {
+                cuda_ctx->cuda_graph->graph_dependencies.resize(max_dependencies);
+            }
+
+            if (num_nodes > 0) {
+                cudaGraphNodeType prev_node_type=cudaGraphNodeTypeKernel;
+                for (size_t i = 0; i < num_nodes; i++) {
+                    cudaGraphNodeType node_type;
+                    CUDA_CHECK(cudaGraphNodeGetType(cuda_ctx->cuda_graph->graph_nodes[i], &node_type));
+                    if ( node_type == cudaGraphNodeTypeKernel && prev_node_type == cudaGraphNodeTypeKernel )
+                    {
+                        size_t num_dependencies = 0;
+                        CUDA_CHECK(cudaGraphNodeGetDependencies(cuda_ctx->cuda_graph->graph_nodes[i], nullptr, &num_dependencies));
+                        if (num_dependencies > 0) {
+                            CUDA_CHECK(cudaGraphNodeGetDependencies(cuda_ctx->cuda_graph->graph_nodes[i], cuda_ctx->cuda_graph->graph_dependencies.data(), &num_dependencies));
+                            for (size_t j = 0; j < num_dependencies; j++) {
+                                cudaGraphEdgeData edge_data = {};
+                                edge_data.type = cudaGraphDependencyTypeProgrammatic;
+                                edge_data.from_port = cudaGraphKernelNodePortProgrammatic;
+                                edge_data.to_port = 0;
+                                // Remove existing edge and add it back with programmatic properties
+                                CUDA_CHECK(cudaGraphRemoveDependencies(cuda_ctx->cuda_graph->graph, &cuda_ctx->cuda_graph->graph_dependencies[j], &cuda_ctx->cuda_graph->graph_nodes[i], 1));
+                                CUDA_CHECK(cudaGraphAddDependencies_v2(cuda_ctx->cuda_graph->graph, &cuda_ctx->cuda_graph->graph_dependencies[j], &cuda_ctx->cuda_graph->graph_nodes[i], &edge_data, 1));
+                            }
+                        }
+                    }
+                    prev_node_type = node_type;
+                }
+            }
+
             graph_evaluated_or_captured = true; // CUDA graph has been captured
 
             std::lock_guard<std::mutex> lock(ggml_cuda_lock);
