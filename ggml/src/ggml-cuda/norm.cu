@@ -121,6 +121,8 @@ static __global__ void rms_norm_f32(
 
     float tmp = 0.0f; // partial sum for thread in warp
 
+    cudaGridDependencySynchronize();
+
     for (int col = tid; col < ncols; col += block_size) {
         const float xi = x[col];
         tmp += xi * xi;
@@ -147,6 +149,7 @@ static __global__ void rms_norm_f32(
     for (int col = tid; col < ncols; col += block_size) {
         dst[col] = scale * x[col];
     }
+    cudaTriggerProgrammaticLaunchCompletion();
 }
 
 template <int block_size>

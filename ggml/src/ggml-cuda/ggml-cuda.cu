@@ -2682,6 +2682,58 @@ static void evaluate_and_capture_cuda_graph(ggml_backend_cuda_context * cuda_ctx
             }
 
             CUDA_CHECK(cudaStreamEndCapture(cuda_ctx->stream(), &cuda_ctx->cuda_graph->graph));
+
+            // Set programmatic dependency properties for all edges
+
+            // TO DO replace statics
+            static cudaGraphNode_t* nodes = NULL;
+            static size_t nodes_capacity = 0;
+            static cudaGraphNode_t* dependencies = NULL;
+            static size_t dependencies_capacity = 0;
+
+            size_t num_nodes = 0;
+            CUDA_CHECK(cudaGraphGetNodes(cuda_ctx->cuda_graph->graph, nullptr, &num_nodes));
+
+            if (num_nodes > nodes_capacity) {
+                nodes = (cudaGraphNode_t*) realloc(nodes, num_nodes * sizeof(cudaGraphNode_t));
+                nodes_capacity = num_nodes;
+            }
+
+            if (num_nodes > 0) {
+                CUDA_CHECK(cudaGraphGetNodes(cuda_ctx->cuda_graph->graph, nodes, &num_nodes));
+            }
+
+            size_t max_dependencies = 0;
+            for (size_t i = 0; i < num_nodes; i++) {
+                size_t num_dependencies = 0;
+                CUDA_CHECK(cudaGraphNodeGetDependencies(nodes[i], nullptr, &num_dependencies));
+                if (num_dependencies > max_dependencies)
+                    max_dependencies = num_dependencies;
+            }
+
+            if (max_dependencies > dependencies_capacity) {
+                dependencies = (cudaGraphNode_t*) realloc(dependencies, max_dependencies * sizeof(cudaGraphNode_t));
+                dependencies_capacity = max_dependencies;
+            }
+            if (num_nodes > 0) {
+                for (size_t i = 0; i < num_nodes; i++) {
+                    size_t num_dependencies = 0;
+                    CUDA_CHECK(cudaGraphNodeGetDependencies(nodes[i], nullptr, &num_dependencies));
+                    if (num_dependencies > 0) {
+                        CUDA_CHECK(cudaGraphNodeGetDependencies(nodes[i], dependencies, &num_dependencies));
+                        for (size_t j = 0; j < num_dependencies; j++) {
+                            cudaGraphEdgeData edge_data;
+                            edge_data.type = cudaGraphDependencyTypeProgrammatic;
+                            edge_data.from_port = cudaGraphKernelNodePortProgrammatic;
+
+                            // Remove existing edge and add it back with programmatic properties
+                            CUDA_CHECK(cudaGraphRemoveDependencies(cuda_ctx->cuda_graph->graph, &dependencies[j], &nodes[i], 1));
+                            CUDA_CHECK(cudaGraphAddDependencies_v2(cuda_ctx->cuda_graph->graph, &dependencies[j], &nodes[i], &edge_data, 1));
+                        }
+                    }
+                }
+            }
+
             graph_evaluated_or_captured = true; // CUDA graph has been captured
         } else {
             graph_evaluated_or_captured = true; // ggml graph has been directly evaluated

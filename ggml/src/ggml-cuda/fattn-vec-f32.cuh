@@ -119,6 +119,7 @@ static __global__ void flash_attn_vec_ext_f32(
 
     __syncthreads();
 
+    cudaGridDependencySynchronize();
     // Convert Q to float2 (f16 K) or q8_1 (quantized K) and store in registers:
     float2  Q_f2[ncols][D/(2*WARP_SIZE)];
     int    Q_i32[ncols][D/(sizeof(int)*QK8_1) == 0 ? 1 : D >= D/(sizeof(int)*QK8_1)];
@@ -330,6 +331,7 @@ static __global__ void flash_attn_vec_ext_f32(
     if (gridDim.y != 1 && tid < ncols && (ncols <= 2 || ic0 + tid < ne01)) {
         dst_meta[((ic0 + tid)*gridDim.z + blockIdx.z) * gridDim.y + blockIdx.y] = make_float2(kqmax[tid], kqsum[tid]);
     }
+    cudaTriggerProgrammaticLaunchCompletion();
 #else
     GGML_UNUSED(Q); GGML_UNUSED(K); GGML_UNUSED(V); GGML_UNUSED(mask);
     GGML_UNUSED(dst); GGML_UNUSED(dst_meta); GGML_UNUSED(scale);

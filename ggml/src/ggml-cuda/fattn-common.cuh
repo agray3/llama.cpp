@@ -622,6 +622,7 @@ static __global__ void flash_attn_combine_results(
     const int tid = threadIdx.x;
     __builtin_assume(tid < D);
 
+    cudaGridDependencySynchronize();
     extern __shared__ float2 meta[];
     for (int i = tid; i < 2*parallel_blocks; i += D) {
         ((float *) meta)[i] = ((const float *)VKQ_meta) [blockIdx.z*(2*parallel_blocks) + i];
@@ -647,6 +648,7 @@ static __global__ void flash_attn_combine_results(
     }
 
     dst[blockIdx.z*D + tid] = VKQ_numerator / VKQ_denominator;
+    cudaTriggerProgrammaticLaunchCompletion();
 }
 
 [[noreturn]]

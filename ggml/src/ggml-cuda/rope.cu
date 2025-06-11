@@ -52,7 +52,7 @@ static __global__ void rope_norm(
 
     if (i0 >= n_dims) {
         const int i = row_dst*ne0 + i0;
-
+        cudaGridDependencySynchronize();
         dst[i + 0] = x[i + 0];
         dst[i + 1] = x[i + 1];
 
@@ -72,6 +72,7 @@ static __global__ void rope_norm(
     float cos_theta;
     float sin_theta;
 
+    cudaGridDependencySynchronize();
     rope_yarn<forward>(theta_base/freq_factor, freq_scale, corr_dims, i0, ext_factor, attn_factor, cos_theta, sin_theta);
 
     const float x0 = x[ix + 0];
@@ -79,6 +80,7 @@ static __global__ void rope_norm(
 
     dst[idst + 0] = x0*cos_theta - x1*sin_theta;
     dst[idst + 1] = x0*sin_theta + x1*cos_theta;
+    cudaTriggerProgrammaticLaunchCompletion();
 }
 
 template<bool forward, bool has_ff, typename T>

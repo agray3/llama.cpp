@@ -90,8 +90,9 @@ static __global__ void unary_op_kernel(const T * x, T * dst, const int k) {
     if (i >= k) {
         return;
     }
-
+    cudaGridDependencySynchronize();
     dst[i] = (T)op((float)x[i]);
+    cudaTriggerProgrammaticLaunchCompletion();
 }
 
 template <float (*op)(float), typename T>

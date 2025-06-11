@@ -50,10 +50,12 @@ static __global__ void k_bin_bcast(const src0_t * src0, const src1_t * src1, dst
     const src1_t * src1_row = src1 + i_src1;
     dst_t * dst_row = dst + i_dst;
 
+    cudaGridDependencySynchronize();
     for (int i0 = i0s; i0 < ne0; i0 += blockDim.x*gridDim.x) {
         const int i10 = i0 % ne10;
         dst_row[i0] = (dst_t)bin_op(src0 ? (float)src0_row[i0] : 0.0f, (float)src1_row[i10]);
     }
+    cudaTriggerProgrammaticLaunchCompletion();
 }
 
 template<float (*bin_op)(const float, const float), typename src0_t, typename src1_t, typename dst_t>

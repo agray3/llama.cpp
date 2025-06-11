@@ -68,7 +68,9 @@ static __global__ void cpy_f32_f16(const char * cx, char * cdst_direct, const in
     const int64_t i10 = i - i13*ne10*ne11*ne12 - i12*ne10*ne11 - i11*ne10;
     const int64_t dst_offset = i10*nb10 + i11*nb11 + i12*nb12 + i13 * nb13;
 
+    cudaGridDependencySynchronize();
     cpy_1(cx + x_offset, cdst + dst_offset);
+    cudaTriggerProgrammaticLaunchCompletion();
 }
 
 static __device__ void cpy_blck_f32_q8_0(const char * cxi, char * cdsti) {

@@ -5,6 +5,7 @@ static __global__ void quantize_q8_1(
         const float * __restrict__ x, void * __restrict__ vy,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
         const int64_t ne0, const int ne1, const int ne2) {
+
     const int64_t i0 = (int64_t)blockDim.x*blockIdx.x + threadIdx.x;
 
     if (i0 >= ne0) {
@@ -27,6 +28,8 @@ static __global__ void quantize_q8_1(
     const int64_t ib  = i_cont / QK8_1; // block index
     const int64_t iqs = i_cont % QK8_1; // quant index
 
+    cudaGridDependencySynchronize();
+
     const float xi = i0 < ne00 ? x[i03*s03 + i02*s02 + i01*s01 + i00] : 0.0f;
     float amax = fabsf(xi);
     float sum = xi;
@@ -45,6 +48,7 @@ static __global__ void quantize_q8_1(
 
     reinterpret_cast<half&>(y[ib].ds.x) = d;
     reinterpret_cast<half&>(y[ib].ds.y) = sum;
+    cudaTriggerProgrammaticLaunchCompletion();
 }
 
 template <mmq_q8_1_ds_layout ds_layout>
