@@ -6,11 +6,29 @@
 #include <thread>
 #include <vector>
 #include <atomic>
-#include "llama.h"
+#include <functional>
+#include <mutex>
+#include <vector>
 #include "arg.h"
 #include "common.h"
 #include "log.h"
 #include "sampling.h"
+
+// Define a scope guard for RAII lifetime management
+class ScopeGuard {
+public:
+    template<class Callable>
+    ScopeGuard(Callable&& func) : m_func(std::forward<Callable>(func)) {}
+    ~ScopeGuard() { if (m_func) m_func(); }
+    ScopeGuard(const ScopeGuard&) = delete;
+    ScopeGuard& operator=(const ScopeGuard&) = delete;
+    ScopeGuard(ScopeGuard&& other) noexcept : m_func(std::move(other.m_func)) {
+        other.m_func = nullptr;
+    }
+private:
+    std::function<void()> m_func;
+};
+
 
 int main(int argc, char ** argv) {
     common_params params;
@@ -72,6 +90,10 @@ int main(int argc, char ** argv) {
         models.emplace_back(model);
     }
 
+    
+    std::vector<llama_context_ptr> kept_contexts;  // Stores contexts after thread exit
+    std::mutex kept_contexts_mutex;  // Protects kept_contexts
+
     for  (int m = 0; m < num_models; ++m) {
         auto * model = models[m].get();
         for (int c = 0; c < num_contexts; ++c) {
@@ -84,6 +106,12 @@ int main(int argc, char ** argv) {
                     failed.store(true);
                     return;
                 }
+
+                // Scope guard moves ctx to kept_contexts when thread exits
+                ScopeGuard guard([&] {
+                    std::lock_guard<std::mutex> lock(kept_contexts_mutex);
+                    kept_contexts.push_back(std::move(ctx));
+                });
 
                 std::unique_ptr<common_sampler, decltype(&common_sampler_free)> sampler { common_sampler_init(model, params.sampling), common_sampler_free };
                 if (sampler == NULL) {
@@ -141,6 +169,8 @@ int main(int argc, char ** argv) {
     for (auto & thread : threads) {
         thread.join();
     }
+
+    kept_contexts.clear();
 
     if (failed) {
         LOG_ERR("One or more threads failed.\n");
